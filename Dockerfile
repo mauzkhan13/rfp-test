@@ -25,7 +25,7 @@ RUN unzip /opt/capsolver/capsolver.zip -d /opt/capsolver/extension && \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
+RUN echo 'export CHROMIUM_FLAGS="--no-sandbox"' >> /etc/environment
 COPY scraper.py .
 
 CMD ["python", "scraper.py"]
