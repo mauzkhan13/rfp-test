@@ -1,37 +1,33 @@
 import os
-import re
 import inspect
 import nodriver.core.browser as b
 
 src = inspect.getfile(b)
-print(f"Patching file: {src}")
+print(f"Patching: {src}")
 
 with open(src, 'r') as f:
     content = f.read()
 
-# Look for the actual root check
-lines = content.splitlines()
-for i, line in enumerate(lines):
-    if 'getuid' in line and '==' in line:
-        print(f"Found at line {i}: {line.strip()}")
-        # Store the exact line to patch
-        original_line = line
-        patched_line = line.replace('os.getuid() == 0', 'False')
-        patched_line = patched_line.replace('os.geteuid() == 0', 'False')
-        patched_line = patched_line.replace('getuid() == 0', 'False')
-        lines[i] = patched_line
-        print(f"Changed to: {patched_line}")
+# Find and patch all root/sandbox checks
+replacements = [
+    ('if os.getuid() == 0:', 'if False:  # patched'),
+    ('if os.geteuid() == 0:', 'if False:  # patched'),
+    ('if getuid() == 0:', 'if False:  # patched'),
+    ('if os.getuid() == 0 or os.geteuid() == 0:', 'if False:  # patched'),
+]
 
-# Also look for the exception message
-for i, line in enumerate(lines):
-    if 'Failed to connect to browser' in line:
-        print(f"Found connection error at line {i}")
-        # Comment out the exception
-        if i > 0:
-            lines[i-1] = "# " + lines[i-1] if not lines[i-1].strip().startswith('#') else lines[i-1]
+for old, new in replacements:
+    if old in content:
+        content = content.replace(old, new)
+        print(f"✓ Patched: {old.strip()}")
 
-# Write back the patched content
+# Also patch the sandbox warning function
+if 'def _check_sandbox' in content:
+    content = content.replace('def _check_sandbox', 'def _check_sandbox_disabled')
+    print("✓ Disabled sandbox check function")
+
+# Write the patched content
 with open(src, 'w') as f:
-    f.write('\n'.join(lines))
+    f.write(content)
 
-print("✓ Patch completed")
+print("✓ Patch applied successfully")
