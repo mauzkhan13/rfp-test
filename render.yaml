@@ -1,0 +1,7 @@
+services:
+  - type: cron
+    name: rfp-test-scraper
+    runtime: docker
+    schedule: "0 * * * *"
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python scraper.py
