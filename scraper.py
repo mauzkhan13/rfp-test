@@ -42,20 +42,8 @@ async def wait_for_cloudflare(tab, timeout=80):
     return False
 
 async def scraper():
-    browser = await start(
-        headless=False,
-        browser_args=[
-            "--no-sandbox",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-infobars",
-            "--disable-dev-shm-usage",
-            "--disable-extensions",
-            "--start-maximized",
-            "--lang=en-US",
-            "--window-size=1920,1080",
-        ],
-        lang="en-US"
-    )
+    browser = await start()
+        
     try:
         # Stealth injection
         tab = await browser.get("about:blank")
@@ -69,7 +57,7 @@ async def scraper():
         # ── Load listing page ─────────────────────────────────────────────────
         print("Opening main page...")
         tab = await browser.get("https://utah.bonfirehub.com/portal/?tab=openOpportunities")
-        await asyncio.sleep(50)
+        await asyncio.sleep(30)
 
         html_content = await tab.get_content()
         soup = BeautifulSoup(html_content, "html.parser")
@@ -77,7 +65,7 @@ async def scraper():
         print(f"Found {len(table)} rows")
 
         links = []
-        for row in table[:3]:
+        for row in table[:1]:
             anchor = row.find("a", href=True)
             if anchor:
                 full_url = urljoin(BASE_URL, anchor["href"])
@@ -102,7 +90,7 @@ async def scraper():
                     continue
 
                 print("  ✓ Cloudflare cleared, waiting for JS render...")
-                await asyncio.sleep(8)
+                await asyncio.sleep(3)
 
                 # Extract via JS directly from live DOM
                 js_content = await detail_tab.evaluate("""
