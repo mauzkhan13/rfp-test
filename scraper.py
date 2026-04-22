@@ -60,7 +60,15 @@ async def scraper():
         print(f"Chrome stderr: {result.stderr[:500]}")
     else:
         print("✓ Chrome manual test passed")
-
+    # Print the actual nodriver browser.py content around the check
+    import nodriver.core.browser as b
+    import inspect
+    src = inspect.getfile(b)
+    with open(src, 'r') as f:
+        lines = f.readlines()
+    for i, line in enumerate(lines):
+        if 'getuid' in line or 'root' in line.lower() or 'sandbox' in line.lower():
+            print(f"browser.py Line {i}: {line.rstrip()}")
     # ── Start nodriver ────────────────────────────────────────────────────────
     print("Starting browser via nodriver...")
     browser = await start(
