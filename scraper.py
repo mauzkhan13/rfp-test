@@ -72,21 +72,23 @@ async def scraper():
     # ── Start nodriver ────────────────────────────────────────────────────────
     print("Starting browser via nodriver...")
     browser = await start(
-        headless=False,
-        no_sandbox=True,
-        browser_executable_path=chrome,
-        browser_args=[
+    headless=True,
+    no_sandbox=True,
+    browser_executable_path=chrome,
+    browser_args=[
             "--no-sandbox",
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
+            "--remote-debugging-port=9222",
+            "--remote-debugging-address=0.0.0.0",
+            "--single-process",
+            "--no-zygote",
+            "--disable-software-rasterizer",
             "--disable-blink-features=AutomationControlled",
             f"--load-extension={CAPSOLVER_EXTENSION}",
             f"--disable-extensions-except={CAPSOLVER_EXTENSION}",
-            "--window-size=1920,1080",
-            "--lang=en-US",
         ],
-        lang="en-US"
     )
     print("✓ Browser started")
 
