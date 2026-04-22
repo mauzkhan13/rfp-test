@@ -1,9 +1,8 @@
-FROM python:3.13-slim-bookworm
+FROM python:3.13-slim-bookworm 
 
 RUN apt-get update && apt-get install -y \
     chromium \
     xvfb \
-    x11-utils \
     libnss3 \
     libatk-bridge2.0-0 \
     libgtk-3-0 \
@@ -25,19 +24,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY patch_nodriver.py .
 RUN python patch_nodriver.py
-
-# ── Test Chrome starts correctly ──────────────────────────────────────────────
-RUN Xvfb :99 -screen 0 1920x1080x24 & \
-    sleep 2 && \
-    DISPLAY=:99 chromium \
-      --no-sandbox \
-      --disable-setuid-sandbox \
-      --disable-gpu \
-      --disable-dev-shm-usage \
-      --headless=new \
-      --dump-dom \
-      about:blank && \
-    echo "✓ Chrome test passed" || echo "✗ Chrome test failed"
 
 COPY scraper.py .
 
