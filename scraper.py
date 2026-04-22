@@ -15,32 +15,25 @@ except Exception as e:
     USE_VDISPLAY = False
     print(f"✗ Xvfb failed: {e}")
 
-from nodriver import start
+import nodriver as uc
+from nodriver import Browser, Config
 
 CAPSOLVER_API_KEY   = "CAP-4DA12EBE6D7D01089210F3BECC75A576CD4542D38CCFB4BFB0E03372A78BFA03"
 CAPSOLVER_EXTENSION = "/opt/capsolver/extension"
 
 async def scraper():
-
-    # ── Debug info ────────────────────────────────────────────────────────────
-    print(f"DISPLAY      : {os.environ.get('DISPLAY', 'NOT SET')}")
-    print(f"UID          : {os.getuid()}")
-    print(f"DISPLAY      : {os.environ.get('DISPLAY')}")
+    print(f"DISPLAY: {os.environ.get('DISPLAY')}")
+    print(f"UID    : {os.getuid()}")
 
     chrome = (
         shutil.which("chromium") or
         shutil.which("chromium-browser") or
-        shutil.which("google-chrome") or
         "/usr/bin/chromium"
     )
-    print(f"Chrome path  : {chrome}")
-    print(f"Chrome exists: {os.path.exists(chrome)}")
+    print(f"Chrome : {chrome}")
 
     # ── Configure Capsolver ───────────────────────────────────────────────────
     config_path = os.path.join(CAPSOLVER_EXTENSION, "assets", "config.js")
-    print(f"Config path  : {config_path}")
-    print(f"Config exists: {os.path.exists(config_path)}")
-
     if os.path.exists(config_path):
         with open(config_path, "r") as f:
             content = f.read()
@@ -50,18 +43,13 @@ async def scraper():
                 f.write(content)
         print("✓ Capsolver configured")
     else:
-        print("✗ config.js missing — files found:")
-        for root, dirs, files in os.walk(CAPSOLVER_EXTENSION):
-            for f in files:
-                print(f"   {os.path.join(root, f)}")
+        print(f"✗ config.js not found")
 
-    # ── Start browser ─────────────────────────────────────────────────────────
-    print("Starting browser...")
-    browser = await start(
+    # ── Build config manually — bypasses root user check ─────────────────────
+    config = Config(
         headless=False,
-        no_sandbox=True,
         browser_executable_path=chrome,
-        browser_args=[
+        add_arguments=[
             "--no-sandbox",
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
@@ -71,9 +59,12 @@ async def scraper():
             f"--disable-extensions-except={CAPSOLVER_EXTENSION}",
             "--window-size=1920,1080",
             "--lang=en-US",
-        ],
-        lang="en-US"
+        ]
     )
+    config.sandbox = False  # force disable sandbox check
+
+    print("Starting browser...")
+    browser = await Browser.create(config)
     print("✓ Browser started")
 
     try:
