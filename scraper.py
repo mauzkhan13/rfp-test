@@ -2,6 +2,8 @@ import asyncio
 import os
 import shutil
 import warnings
+import subprocess
+import time
 warnings.filterwarnings("ignore", category=ResourceWarning)
 
 try:
@@ -15,7 +17,7 @@ except Exception as e:
     USE_VDISPLAY = False
     print(f"✗ Xvfb failed: {e}")
 
-from nodriver import start, Browser
+from nodriver import start
 
 CAPSOLVER_API_KEY   = "CAP-4DA12EBE6D7D01089210F3BECC75A576CD4542D38CCFB4BFB0E03372A78BFA03"
 CAPSOLVER_EXTENSION = "/opt/capsolver/extension"
@@ -42,73 +44,90 @@ async def scraper():
                 f.write(content)
         print("✓ Capsolver configured")
 
-    # ── Test Chrome manually before nodriver ─────────────────────────────────
-    print("Testing Chrome directly...")
-    import subprocess
-    result = subprocess.run([
-        chrome,
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        "--headless=new",
-        "--dump-dom",
-        "about:blank"
-    ], capture_output=True, text=True, timeout=15)
-    print(f"Chrome exit code: {result.returncode}")
-    if result.returncode != 0:
-        print(f"Chrome stderr: {result.stderr[:500]}")
-    else:
-        print("✓ Chrome manual test passed")
+    # ── Start Chrome manually and connect via CDP ─────────────────────────────
+    import json
+    import aiohttp
     
-    # ── Start nodriver with more explicit configuration ─────────────────────
-    print("Starting browser via nodriver...")
-    
-    # Create user data directory for persistent profile
+    # Create user data directory
     user_data_dir = "/tmp/chrome-profile"
     os.makedirs(user_data_dir, exist_ok=True)
     
-    browser_args = [
+    # Start Chrome with remote debugging
+    chrome_args = [
+        chrome,
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--disable-blink-features=AutomationControlled",
+        "--remote-debugging-port=9222",
+        f"--user-data-dir={user_data_dir}",
         f"--load-extension={CAPSOLVER_EXTENSION}",
         f"--disable-extensions-except={CAPSOLVER_EXTENSION}",
         "--window-size=1920,1080",
         "--lang=en-US",
-        "--remote-debugging-port=9222",  # Add remote debugging
-        f"--user-data-dir={user_data_dir}",
+        "--disable-blink-features=AutomationControlled",
         "--disable-infobars",
         "--disable-breakpad",
         "--disable-crash-reporter",
     ]
     
+    print("Starting Chrome process...")
+    chrome_process = subprocess.Popen(
+        chrome_args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={**os.environ, "DISPLAY": os.environ.get("DISPLAY", ":99")}
+    )
+    
+    # Wait for Chrome to start
+    await asyncio.sleep(3)
+    
+    # Connect to Chrome via CDP
+    print("Connecting to Chrome via CDP...")
     try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("http://localhost:9222/json/version") as resp:
+                data = await resp.json()
+                ws_url = data["webSocketDebuggerUrl"]
+                print(f"WebSocket URL: {ws_url}")
+                
+                # Connect using nodriver's browser
+                from nodriver.core.browser import Browser
+                from nodriver.core.config import Config
+                
+                config = Config(
+                    headless=False,
+                    no_sandbox=True,
+                    browser_executable_path=chrome,
+                    user_data_dir=user_data_dir,
+                    connection_url=ws_url,  # Connect to existing instance
+                )
+                
+                browser = await Browser.create(config)
+                print("✓ Browser connected successfully")
+                
+    except Exception as e:
+        print(f"Failed to connect via CDP: {e}")
+        # Fallback: Let nodriver start it
+        print("Falling back to nodriver start...")
         browser = await start(
             headless=False,
             no_sandbox=True,
             browser_executable_path=chrome,
-            browser_args=browser_args,
-            lang="en-US",
-            user_data_dir=user_data_dir,
+            browser_args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-blink-features=AutomationControlled",
+                f"--load-extension={CAPSOLVER_EXTENSION}",
+                f"--disable-extensions-except={CAPSOLVER_EXTENSION}",
+                "--window-size=1920,1080",
+                "--lang=en-US",
+                "--remote-debugging-port=9223",  # Different port
+            ],
+            lang="en-US"
         )
-        print("✓ Browser started")
-    except Exception as e:
-        print(f"Failed to start browser: {e}")
-        # Try alternative method
-        print("Trying alternative start method...")
-        from nodriver.core.config import Config
-        config = Config(
-            headless=False,
-            no_sandbox=True,
-            browser_executable_path=chrome,
-            arguments=browser_args,
-            user_data_dir=user_data_dir,
-        )
-        browser = await Browser.create(config)
-        print("✓ Browser started with alternative method")
 
     try:
         page = await browser.get("https://utah.bonfirehub.com/opportunities/230771")
@@ -138,6 +157,7 @@ async def scraper():
         print(f"Error during scraping: {e}")
     finally:
         await browser.stop()
+        chrome_process.terminate()
         if USE_VDISPLAY:
             vdisplay.stop()
 
