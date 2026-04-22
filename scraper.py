@@ -63,7 +63,8 @@ async def scraper():
         print("Warning: Capsolver API key not set or extension not found")
 
     browser = await start(
-        headless=False,   # Xvfb provides the virtual display
+        headless=False,  
+        no_sandbox=True, 
         browser_args=[
             "--no-sandbox",
             "--disable-blink-features=AutomationControlled",
