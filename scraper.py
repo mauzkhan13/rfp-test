@@ -65,7 +65,7 @@ async def scraper():
         print(f"Found {len(table)} rows")
 
         links = []
-        for row in table[:3]:
+        for row in table[:1]:
             anchor = row.find("a", href=True)
             if anchor:
                 full_url = urljoin(BASE_URL, anchor["href"])
@@ -76,20 +76,54 @@ async def scraper():
             print(f"  - {l}")
 
         all_data = []
+        
         for i, link in enumerate(links):
             print(f"\n[{i+1}/{len(links)}] Visiting: {link}")
             try:
                 tab = await browser.get(link)
-                await asyncio.sleep(25)
+                
+                # Wait for the specific element to appear in DOM
+                print("  Waiting for detail section to load...")
+                for attempt in range(30):  # wait up to 60 seconds
+                    await asyncio.sleep(2)
+                    check = await tab.evaluate("""
+                        (() => {
+                            const el = document.querySelector('div.modalSection.projectDetailSection');
+                            return el ? el.innerText.trim().length : 0;
+                        })()
+                    """)
+                    if check and check > 50:
+                        print(f"  Element found after {(attempt+1)*2}s (length: {check})")
+                        break
+                    if attempt % 5 == 0:
+                        print(f"  Still waiting... ({(attempt+1)*2}s)")
+                else:
+                    print("  Timed out waiting for element")
+        
                 sub_html = await tab.get_content()
                 sub_soup = BeautifulSoup(sub_html, "html.parser")
                 detail_section = sub_soup.select("div.modalSection.projectDetailSection")
+                
                 if detail_section:
                     for section in detail_section:
-                        # print(f"  Extracted: {section.get_text(strip=True)[:200]}...")
+                        print(f"  Extracted: {section.get_text(strip=True)[:200]}...")
                         all_data.append({"url": link, "content": section.get_text(strip=True)})
                 else:
-                    print("  No detail section found.")
+                    # ── Fallback: extract directly via JS ──
+                    print("  Trying JS extraction fallback...")
+                    js_content = await tab.evaluate("""
+                        (() => {
+                            const sections = document.querySelectorAll('div.modalSection.projectDetailSection');
+                            return Array.from(sections).map(s => s.innerText.trim());
+                        })()
+                    """)
+                    if js_content:
+                        for content in js_content:
+                            print(f"  JS Extracted: {content[:200]}...")
+                            all_data.append({"url": link, "content": content})
+                    else:
+                        print("  No detail section found even after wait.")
+                        
             except Exception as e:
                 print(f"  Error on {link}: {e}")
 
