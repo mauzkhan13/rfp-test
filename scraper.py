@@ -8,7 +8,6 @@ import warnings
 
 warnings.filterwarnings("ignore", category=ResourceWarning)
 
-# ── Virtual display (Linux only) ──────────────────────────────────────────────
 try:
     from xvfbwrapper import Xvfb
     vdisplay = Xvfb(width=1920, height=1080, colordepth=24)
@@ -17,8 +16,7 @@ try:
     print("Virtual display started")
 except ImportError:
     USE_VDISPLAY = False
-    print("xvfbwrapper not found, running without virtual display")
-# ─────────────────────────────────────────────────────────────────────────────
+    print("xvfbwrapper not found")
 
 class FilteredStderr:
     def write(self, msg):
@@ -30,9 +28,22 @@ sys.stderr = FilteredStderr()
 
 BASE_URL = "https://utah.bonfirehub.com/"
 
+async def wait_for_cloudflare(tab, timeout=80):
+    """Poll until Cloudflare challenge clears. Returns True if cleared."""
+    for attempt in range(timeout // 2):
+        await asyncio.sleep(2)
+        try:
+            title = await tab.evaluate("document.title")
+            print(f"  [{attempt*2}s] Title: {title}")
+            if title and "just a moment" not in title.lower():
+                return True
+        except Exception:
+            pass
+    return False
+
 async def scraper():
     browser = await start(
-        headless=False,          # Keep False — Xvfb handles invisibility
+        headless=False,
         browser_args=[
             "--no-sandbox",
             "--disable-blink-features=AutomationControlled",
@@ -46,18 +57,19 @@ async def scraper():
         lang="en-US"
     )
     try:
-        # Inject stealth JS before any navigation
+        # Stealth injection
         tab = await browser.get("about:blank")
         await tab.evaluate("""
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-            window.chrome = { runtime: {}, app: {}, csi: () => {}, loadTimes: () => {} };
+            Object.defineProperty(navigator, 'plugins',   { get: () => [1,2,3,4,5] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'] });
+            window.chrome = { runtime:{}, app:{}, csi:()=>{}, loadTimes:()=>{} };
         """)
 
+        # ── Load listing page ─────────────────────────────────────────────────
         print("Opening main page...")
         tab = await browser.get("https://utah.bonfirehub.com/portal/?tab=openOpportunities")
-        await asyncio.sleep(20)
+        await asyncio.sleep(50)
 
         html_content = await tab.get_content()
         soup = BeautifulSoup(html_content, "html.parser")
@@ -65,7 +77,7 @@ async def scraper():
         print(f"Found {len(table)} rows")
 
         links = []
-        for row in table[:1]:
+        for row in table[:3]:
             anchor = row.find("a", href=True)
             if anchor:
                 full_url = urljoin(BASE_URL, anchor["href"])
@@ -75,42 +87,54 @@ async def scraper():
         for l in links:
             print(f"  - {l}")
 
+        # ── Scrape each detail page ───────────────────────────────────────────
         all_data = []
-        
         for i, link in enumerate(links):
             print(f"\n[{i+1}/{len(links)}] Visiting: {link}")
+            detail_tab = None
             try:
-                tab = await browser.get(link)
-                await asyncio.sleep(40)  # longer wait
-        
-                # ── See exactly what the page contains ──
-                page_title = await tab.evaluate("document.title")
-                page_url = await tab.evaluate("window.location.href")
-                body_text = await tab.evaluate("document.body ? document.body.innerText.substring(0, 500) : 'NO BODY'")
-                html_length = await tab.evaluate("document.documentElement.outerHTML.length")
-                
-                # Check if our target element exists
-                element_exists = await tab.evaluate("""
+                # Open in NEW TAB — inherits Cloudflare session cookies
+                detail_tab = await browser.get(link, new_tab=True)
+
+                cleared = await wait_for_cloudflare(detail_tab, timeout=80)
+                if not cleared:
+                    print("  ✗ Cloudflare never cleared, skipping.")
+                    continue
+
+                print("  ✓ Cloudflare cleared, waiting for JS render...")
+                await asyncio.sleep(8)
+
+                # Extract via JS directly from live DOM
+                js_content = await detail_tab.evaluate("""
                     (() => {
-                        const el = document.querySelector('div.modalSection.projectDetailSection');
-                        return el ? 'FOUND: ' + el.innerText.substring(0, 200) : 'NOT FOUND';
+                        const sections = document.querySelectorAll('div.modalSection.projectDetailSection');
+                        return Array.from(sections).map(s => s.innerText.trim());
                     })()
                 """)
-        
-                print(f"  Page title   : {page_title}")
-                print(f"  Current URL  : {page_url}")
-                print(f"  HTML length  : {html_length}")
-                print(f"  Body preview : {body_text}")
-                print(f"  Target element: {element_exists}")
-                
+
+                if js_content and any(js_content):
+                    for content in js_content:
+                        if content:
+                            print(f"  Extracted: {content[:200]}...")
+                            all_data.append({"url": link, "content": content})
+                else:
+                    print("  No detail section found.")
+
             except Exception as e:
                 print(f"  Error on {link}: {e}")
+            finally:
+                if detail_tab:
+                    try:
+                        await detail_tab.close()
+                    except Exception:
+                        pass
 
         print(f"\n===== SCRAPED {len(all_data)} SECTIONS =====")
         for item in all_data:
             print(f"\nURL: {item['url']}")
             print(f"Content: {item['content'][:500]}")
             print("-" * 60)
+
     finally:
         browser.stop()
         if USE_VDISPLAY:
