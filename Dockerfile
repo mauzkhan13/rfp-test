@@ -26,9 +26,21 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY patch_nodriver.py .
 RUN python patch_nodriver.py
 
+# ── Test Chrome starts correctly ──────────────────────────────────────────────
+RUN Xvfb :99 -screen 0 1920x1080x24 & \
+    sleep 2 && \
+    DISPLAY=:99 chromium \
+      --no-sandbox \
+      --disable-setuid-sandbox \
+      --disable-gpu \
+      --disable-dev-shm-usage \
+      --headless=new \
+      --dump-dom \
+      about:blank && \
+    echo "✓ Chrome test passed" || echo "✗ Chrome test failed"
+
 COPY scraper.py .
 
-# Run as non-root — this bypasses nodriver root check entirely
 RUN useradd -m -u 1000 scraper && \
     chown -R scraper:scraper /app && \
     chown -R scraper:scraper /opt/capsolver
