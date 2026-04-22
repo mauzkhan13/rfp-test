@@ -1,6 +1,5 @@
 FROM python:3.13-slim-bookworm
 
-# Install Chromium + Xvfb
 RUN apt-get update && apt-get install -y \
     chromium \
     xvfb \
@@ -12,9 +11,18 @@ RUN apt-get update && apt-get install -y \
     libasound2 \
     fonts-liberation \
     ca-certificates \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Copy and extract Capsolver extension from repo
+COPY CapSolver.Browser.Extension-chrome-v1.17.0.zip /opt/capsolver/capsolver.zip
+RUN unzip /opt/capsolver/capsolver.zip -d /opt/capsolver/extension && \
+    rm /opt/capsolver/capsolver.zip && \
+    echo "=== Capsolver files ===" && \
+    ls /opt/capsolver/extension/
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
