@@ -15,8 +15,7 @@ except Exception as e:
     USE_VDISPLAY = False
     print(f"✗ Xvfb failed: {e}")
 
-import nodriver as uc
-from nodriver import Browser, Config
+from nodriver import start
 
 CAPSOLVER_API_KEY   = "CAP-4DA12EBE6D7D01089210F3BECC75A576CD4542D38CCFB4BFB0E03372A78BFA03"
 CAPSOLVER_EXTENSION = "/opt/capsolver/extension"
@@ -42,14 +41,33 @@ async def scraper():
             with open(config_path, "w") as f:
                 f.write(content)
         print("✓ Capsolver configured")
-    else:
-        print(f"✗ config.js not found")
 
-    # ── Build config manually — bypasses root user check ─────────────────────
-    config = Config(
+    # ── Test Chrome manually before nodriver ─────────────────────────────────
+    print("Testing Chrome directly...")
+    import subprocess
+    result = subprocess.run([
+        chrome,
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--headless=new",
+        "--dump-dom",
+        "about:blank"
+    ], capture_output=True, text=True, timeout=15)
+    print(f"Chrome exit code: {result.returncode}")
+    if result.returncode != 0:
+        print(f"Chrome stderr: {result.stderr[:500]}")
+    else:
+        print("✓ Chrome manual test passed")
+
+    # ── Start nodriver ────────────────────────────────────────────────────────
+    print("Starting browser via nodriver...")
+    browser = await start(
         headless=False,
+        no_sandbox=True,
         browser_executable_path=chrome,
-        add_arguments=[
+        browser_args=[
             "--no-sandbox",
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
@@ -59,12 +77,9 @@ async def scraper():
             f"--disable-extensions-except={CAPSOLVER_EXTENSION}",
             "--window-size=1920,1080",
             "--lang=en-US",
-        ]
+        ],
+        lang="en-US"
     )
-    config.sandbox = False  # force disable sandbox check
-
-    print("Starting browser...")
-    browser = await Browser.create(config)
     print("✓ Browser started")
 
     try:
