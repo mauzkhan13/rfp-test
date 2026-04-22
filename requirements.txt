@@ -1,0 +1,4 @@
+nodriver>=0.48.1
+beautifulsoup4>=4.12
+xvfbwrapper>=0.2.9
+lxml>=5.0
