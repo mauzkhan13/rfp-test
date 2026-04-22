@@ -43,4 +43,5 @@ print('nodriver patched successfully')
 
 COPY scraper.py .
 
+
 CMD ["python", "scraper.py"]
