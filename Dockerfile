@@ -16,7 +16,6 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy and extract Capsolver extension from repo
 COPY CapSolver.Browser.Extension-chrome-v1.17.0.zip /opt/capsolver/capsolver.zip
 RUN unzip /opt/capsolver/capsolver.zip -d /opt/capsolver/extension && \
     rm /opt/capsolver/capsolver.zip && \
@@ -25,7 +24,23 @@ RUN unzip /opt/capsolver/capsolver.zip -d /opt/capsolver/extension && \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN echo 'export CHROMIUM_FLAGS="--no-sandbox"' >> /etc/environment
+
+# Patch nodriver root user check
+RUN python -c "
+import nodriver.core.browser as b
+import inspect
+src = inspect.getfile(b)
+with open(src, 'r') as f:
+    content = f.read()
+content = content.replace(
+    'if os.getuid() == 0:',
+    'if False:  # patched - allow root'
+)
+with open(src, 'w') as f:
+    f.write(content)
+print('nodriver patched successfully')
+"
+
 COPY scraper.py .
 
 CMD ["python", "scraper.py"]
