@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import asyncio
 import sys
+import os
 import warnings
 
 warnings.filterwarnings("ignore", category=ResourceWarning)
@@ -12,6 +13,7 @@ try:
     from xvfbwrapper import Xvfb
     vdisplay = Xvfb(width=1920, height=1080, colordepth=24)
     vdisplay.start()
+    os.environ["DISPLAY"] = ":99"
     USE_VDISPLAY = True
     print("Virtual display started")
 except ImportError:
@@ -26,24 +28,56 @@ class FilteredStderr:
         sys.__stderr__.flush()
 sys.stderr = FilteredStderr()
 
-BASE_URL = "https://utah.bonfirehub.com/"
+BASE_URL  = "https://utah.bonfirehub.com/"
+CAPSOLVER_API_KEY      = os.environ.get("CAPSOLVER_API_KEY", "")
+CAPSOLVER_EXTENSION    = "/opt/capsolver/extension"
 
-async def wait_for_cloudflare(tab, timeout=80):
-    """Poll until Cloudflare challenge clears. Returns True if cleared."""
+async def wait_for_cloudflare(tab, timeout=120):
+    """Poll until Cloudflare challenge clears."""
     for attempt in range(timeout // 2):
         await asyncio.sleep(2)
         try:
             title = await tab.evaluate("document.title")
             print(f"  [{attempt*2}s] Title: {title}")
             if title and "just a moment" not in title.lower():
+                print(f"  ✓ Cloudflare cleared after {attempt*2}s")
                 return True
         except Exception:
             pass
     return False
 
 async def scraper():
-    browser = await start()
-        
+    # ── Configure Capsolver extension before launch ───────────────────────────
+    capsolver_config = os.path.join(CAPSOLVER_EXTENSION, "assets", "config.js")
+    if CAPSOLVER_API_KEY and os.path.exists(capsolver_config):
+        with open(capsolver_config, "r") as f:
+            config_content = f.read()
+        config_content = config_content.replace(
+            "apiKey: ''",
+            f"apiKey: '{CAPSOLVER_API_KEY}'"
+        )
+        with open(capsolver_config, "w") as f:
+            f.write(config_content)
+        print(f"Capsolver configured with API key")
+    else:
+        print("Warning: Capsolver API key not set or extension not found")
+
+    browser = await start(
+        headless=False,   # Xvfb provides the virtual display
+        browser_args=[
+            "--no-sandbox",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-infobars",
+            "--disable-dev-shm-usage",
+            f"--load-extension={CAPSOLVER_EXTENSION}",
+            f"--disable-extensions-except={CAPSOLVER_EXTENSION}",
+            "--start-maximized",
+            "--lang=en-US",
+            "--window-size=1920,1080",
+        ],
+        lang="en-US"
+    )
+
     try:
         # Stealth injection
         tab = await browser.get("about:blank")
@@ -56,8 +90,17 @@ async def scraper():
 
         # ── Load listing page ─────────────────────────────────────────────────
         print("Opening main page...")
-        tab = await browser.get("https://utah.bonfirehub.com/portal/?tab=openOpportunities")
-        await asyncio.sleep(30)
+        tab = await browser.get(
+            "https://utah.bonfirehub.com/portal/?tab=openOpportunities"
+        )
+
+        # Wait for listing CF to clear
+        cleared = await wait_for_cloudflare(tab, timeout=120)
+        if not cleared:
+            print("Main page Cloudflare never cleared. Exiting.")
+            return
+
+        await asyncio.sleep(10)  # let JS render table
 
         html_content = await tab.get_content()
         soup = BeautifulSoup(html_content, "html.parser")
@@ -81,21 +124,23 @@ async def scraper():
             print(f"\n[{i+1}/{len(links)}] Visiting: {link}")
             detail_tab = None
             try:
-                # Open in NEW TAB — inherits Cloudflare session cookies
+                # Open in new tab — inherits session cookies
                 detail_tab = await browser.get(link, new_tab=True)
 
-                cleared = await wait_for_cloudflare(detail_tab, timeout=80)
+                # Capsolver auto-solves CF challenge in background
+                cleared = await wait_for_cloudflare(detail_tab, timeout=120)
                 if not cleared:
                     print("  ✗ Cloudflare never cleared, skipping.")
                     continue
 
-                print("  ✓ Cloudflare cleared, waiting for JS render...")
-                await asyncio.sleep(3)
+                await asyncio.sleep(8)  # let JS render content
 
-                # Extract via JS directly from live DOM
+                # Extract via JS from live DOM
                 js_content = await detail_tab.evaluate("""
                     (() => {
-                        const sections = document.querySelectorAll('div.modalSection.projectDetailSection');
+                        const sections = document.querySelectorAll(
+                            'div.modalSection.projectDetailSection'
+                        );
                         return Array.from(sections).map(s => s.innerText.trim());
                     })()
                 """)
@@ -103,7 +148,7 @@ async def scraper():
                 if js_content and any(js_content):
                     for content in js_content:
                         if content:
-                            print(f"  Extracted: {content[:200]}...")
+                            print(f"  ✓ Extracted: {content[:200]}...")
                             all_data.append({"url": link, "content": content})
                 else:
                     print("  No detail section found.")
