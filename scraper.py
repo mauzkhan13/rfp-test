@@ -1,33 +1,11 @@
-import asyncio 
+import asyncio
 import os
-import shutil
-import warnings
-warnings.filterwarnings("ignore", category=ResourceWarning)
-
-try:
-    from xvfbwrapper import Xvfb
-    vdisplay = Xvfb(width=1920, height=1080, colordepth=24)
-    vdisplay.start()
-    os.environ["DISPLAY"] = ":99"
-    USE_VDISPLAY = True
-    print("✓ Virtual display started")
-except Exception as e:
-    USE_VDISPLAY = False
-    print(f"✗ Xvfb failed: {e}")
-
 from nodriver import start
 
 CAPSOLVER_API_KEY = "CAP-4DA12EBE6D7D01089210F3BECC75A576CD4542D38CCFB4BFB0E03372A78BFA03"
-CAPSOLVER_EXTENSION = "/opt/capsolver/extension"
+CAPSOLVER_EXTENSION = r"C:\Users\Mauz Khan\Downloads\CapSolver.Browser.Extension-chrome-v1.17.0\capsolver_extension"
 
-async def scraper():
-    print(f"DISPLAY: {os.environ.get('DISPLAY')}")
-    print(f"UID: {os.getuid()}")
-
-    chrome = shutil.which("chromium") or "/usr/bin/chromium"
-    print(f"Chrome: {chrome}")
-
-    # Configure Capsolver
+async def test_capsolver():
     config_path = os.path.join(CAPSOLVER_EXTENSION, "assets", "config.js")
     if os.path.exists(config_path):
         with open(config_path, "r") as f:
@@ -36,45 +14,35 @@ async def scraper():
             content = content.replace("apiKey: ''", f"apiKey: '{CAPSOLVER_API_KEY}'")
             with open(config_path, "w") as f:
                 f.write(content)
-        print("✓ Capsolver configured")
+        print("✓ Capsolver API key configured")
+    else:
+        print(f"✗ config.js not found at: {config_path}")
+        return
 
-    # Create temp profile directory
-    user_data_dir = "/tmp/chrome-profile"
-    os.makedirs(user_data_dir, exist_ok=True)
-    os.chmod(user_data_dir, 0o777)
-
-    # Start browser with explicit arguments
     browser = await start(
         headless=False,
-        no_sandbox=True,
-        browser_executable_path=chrome,
-        user_data_dir=user_data_dir,
         browser_args=[
             "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
             "--disable-blink-features=AutomationControlled",
             f"--load-extension={CAPSOLVER_EXTENSION}",
             f"--disable-extensions-except={CAPSOLVER_EXTENSION}",
             "--window-size=1920,1080",
             "--lang=en-US",
-            "--disable-infobars",
-            "--disable-breakpad",
-            "--remote-debugging-port=9222",
-        ]
+        ],
+        lang="en-US"
     )
-    print("✓ Browser started")
 
     try:
+        print("Opening Cloudflare test page...")
         tab = await browser.get("https://utah.bonfirehub.com/opportunities/230771")
 
         for attempt in range(40):
             await asyncio.sleep(2)
             title = await tab.evaluate("document.title")
             print(f"  [{attempt*2}s] Title: {title}")
+
             if title and "just a moment" not in title.lower():
-                print("  ✓ Cloudflare cleared!")
+                print(f"  ✓ Cloudflare cleared after {attempt*2}s!")
                 break
         else:
             print("  ✗ Cloudflare never cleared")
@@ -85,15 +53,14 @@ async def scraper():
         result = await tab.evaluate("""
             (() => {
                 const el = document.querySelector('div.modalSection.projectDetailSection');
-                return el ? '✓ FOUND: ' + el.innerText.substring(0, 300) : '✗ Not found';
+                return el ? '✓ Element found: ' + el.innerText.substring(0, 200) : '✗ Element not found';
             })()
         """)
-        print(f"Result: {result}")
+        print(f"\nResult: {result}")
 
     finally:
-        await browser.stop()
-        if USE_VDISPLAY:
-            vdisplay.stop()
+        input("\nPress Enter to close browser...")
+        browser.stop()
 
 if __name__ == "__main__":
-    asyncio.run(scraper())
+    asyncio.run(test_capsolver())
