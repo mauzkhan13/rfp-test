@@ -17,7 +17,7 @@ async def main():
 
     try:
         page = await browser.get('https://utah.bonfirehub.com/opportunities/230771')
-        await page.wait(10)
+        await page.wait(100)
         title = await page.evaluate("document.title")
         print(f"Title: {title}")
     finally:
